@@ -1,18 +1,18 @@
-#include <cassert>
 #include <cstring>
-#ifndef _MSC_VER
+#if (!(_MSC_VER) && !(__MINGW32__) && !(__MINGW64__))
 #include <dirent.h>
-#include <unistd.h>
 #else
 // Microsoft can't be bothered to provide standard utils.
 #include <dirent_portable.h>
 #endif
+#include <unistd.h>
 #include <cinttypes>
 
 #include <cstdio>
 #include <cstdlib>
 
-#include "simdjson/jsonparser.h"
+#include "simdjson.h"
+
 
 /**
  * Does the file filename ends with the given extension.
@@ -23,7 +23,7 @@ static bool has_extension(const char *filename, const char *extension) {
 }
 
 bool starts_with(const char *pre, const char *str) {
-  size_t len_pre = strlen(pre), len_str = strlen(str);
+  size_t len_pre = std::strlen(pre), len_str = std::strlen(str);
   return len_str < len_pre ? false : strncmp(pre, str, len_pre) == 0;
 }
 
@@ -34,7 +34,7 @@ bool contains(const char *pre, const char *str) {
 bool validate(const char *dirname) {
   bool everything_fine = true;
   const char *extension = ".json";
-  size_t dirlen = strlen(dirname);
+  size_t dirlen = std::strlen(dirname);
   struct dirent **entry_list;
   int c = scandir(dirname, &entry_list, nullptr, alphasort);
   if (c < 0) {
@@ -56,42 +56,34 @@ bool validate(const char *dirname) {
     if (has_extension(name, extension)) {
       printf("validating: file %s ", name);
       fflush(nullptr);
-      size_t filelen = strlen(name);
-      char *fullpath = static_cast<char *>(malloc(dirlen + filelen + 1 + 1));
-      strcpy(fullpath, dirname);
-      if (needsep) {
-        fullpath[dirlen] = '/';
-        strcpy(fullpath + dirlen + 1, name);
-      } else {
-        strcpy(fullpath + dirlen, name);
-      }
+      size_t namelen = std::strlen(name);
+      size_t fullpathlen = dirlen + 1 + namelen + 1;
+      char *fullpath = static_cast<char *>(malloc(fullpathlen));
+      snprintf(fullpath, fullpathlen, "%s%s%s", dirname, needsep ? "/" : "", name);
+
       simdjson::padded_string p;
-      try {
-        simdjson::get_corpus(fullpath).swap(p);
-      } catch (const std::exception &) {
+      auto error = simdjson::padded_string::load(fullpath).get(p);
+      if (error) {
         std::cerr << "Could not load the file " << fullpath << std::endl;
         return EXIT_FAILURE;
       }
-      simdjson::ParsedJson pj;
-      bool allocok = pj.allocate_capacity(p.size(), 1024);
-      if (!allocok) {
-        std::cerr << "can't allocate memory" << std::endl;
-        return false;
-      }
+      simdjson::dom::parser parser;
+      auto errorcode = parser.parse(p).error();
       ++how_many;
-      const int parse_res = json_parse(p, pj);
-      printf("%s\n", parse_res == 0 ? "ok" : "invalid");
+      printf("%s\n", errorcode == simdjson::error_code::SUCCESS ? "ok" : "invalid");
       if (contains("EXCLUDE", name)) {
         // skipping
         how_many--;
-      } else if (starts_with("pass", name) && parse_res != 0) {
+      } else if (starts_with("pass", name) && errorcode != simdjson::error_code::SUCCESS) {
         is_file_as_expected[i] = false;
         printf("warning: file %s should pass but it fails. Error is: %s\n",
-               name, simdjson::error_message(parse_res).data());
+               name, simdjson::error_message(errorcode));
+        printf("size of file in bytes: %zu \n", p.size());
         everything_fine = false;
-      } else if (starts_with("fail", name) && parse_res == 0) {
+      } else if (starts_with("fail", name) && errorcode == simdjson::error_code::SUCCESS) {
         is_file_as_expected[i] = false;
         printf("warning: file %s should fail but it passes.\n", name);
+        printf("size of file in bytes: %zu \n", p.size());
         everything_fine = false;
       }
       free(fullpath);
@@ -118,7 +110,28 @@ bool validate(const char *dirname) {
 }
 
 int main(int argc, char *argv[]) {
-  if (argc != 2) {
+  int c;
+  while ((c = getopt(argc, argv, "a:")) != -1) {
+    switch (c) {
+    case 'a': {
+      const simdjson::implementation *impl = simdjson::available_implementations[optarg];
+      if (!impl) {
+        fprintf(stderr, "Unsupported architecture value -a %s\n", optarg);
+        return EXIT_FAILURE;
+      }
+      if(!impl->supported_by_runtime_system()) {
+        fprintf(stderr, "The selected implementation does not match your current CPU: -a %s\n", optarg);
+        return EXIT_FAILURE;
+      }
+      simdjson::active_implementation = impl;
+      break;
+    }
+    default:
+      fprintf(stderr, "Unexpected argument %c\n", c);
+      return EXIT_FAILURE;
+    }
+  }
+  if ((argc - optind) != 1) {
     std::cerr << "Usage: " << argv[0] << " <directorywithjsonfiles>"
               << std::endl;
 #ifndef SIMDJSON_TEST_DATA_DIR
@@ -132,5 +145,5 @@ int main(int argc, char *argv[]) {
     return validate(SIMDJSON_TEST_DATA_DIR) ? EXIT_SUCCESS : EXIT_FAILURE;
 #endif
   }
-  return validate(argv[1]) ? EXIT_SUCCESS : EXIT_FAILURE;
+  return validate(argv[optind]) ? EXIT_SUCCESS : EXIT_FAILURE;
 }

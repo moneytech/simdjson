@@ -1,112 +1,77 @@
 #include <iostream>
-#ifndef _MSC_VER
 #include <unistd.h>
+#include "simdjson.h"
+
+SIMDJSON_PUSH_DISABLE_ALL_WARNINGS
+#ifndef __cpp_exceptions
+#define CXXOPTS_NO_EXCEPTIONS
 #endif
-#include "simdjson/jsonioutil.h"
-#include "simdjson/jsonparser.h"
+#include "cxxopts.hpp"
+SIMDJSON_POP_DISABLE_WARNINGS
 
-void compute_dump(simdjson::ParsedJson::Iterator &pjh) {
-  if (pjh.is_object()) {
-    std::cout << "{";
-    if (pjh.down()) {
-      pjh.print(std::cout); // must be a string
-      std::cout << ":";
-      pjh.next();
-      compute_dump(pjh); // let us recurse
-      while (pjh.next()) {
-        std::cout << ",";
-        pjh.print(std::cout);
-        std::cout << ":";
-        pjh.next();
-        compute_dump(pjh); // let us recurse
-      }
-      pjh.up();
-    }
-    std::cout << "}";
-  } else if (pjh.is_array()) {
-    std::cout << "[";
-    if (pjh.down()) {
-      compute_dump(pjh); // let us recurse
-      while (pjh.next()) {
-        std::cout << ",";
-        compute_dump(pjh); // let us recurse
-      }
-      pjh.up();
-    }
-    std::cout << "]";
-  } else {
-    pjh.print(std::cout); // just print the lone value
-  }
-}
-
+#if CXXOPTS__VERSION_MAJOR < 3 
 int main(int argc, char *argv[]) {
-  bool rawdump = false;
-  bool apidump = false;
-
-#ifndef _MSC_VER
-  int c;
-
-  while ((c = getopt(argc, argv, "da")) != -1) {
-    switch (c) {
-    case 'd':
-      rawdump = true;
-      break;
-    case 'a':
-      apidump = true;
-      break;
-    default:
-      abort();
-    }
-  }
 #else
-  int optind = 1;
+int main(int argc, const char *argv[]) {
 #endif
-  if (optind >= argc) {
-    std::cerr << "Reads json in, out the result of the parsing. " << std::endl;
-    std::cerr << "Usage: " << argv[0] << " <jsonfile>" << std::endl;
-    std::cerr << "The -d flag dumps the raw content of the tape." << std::endl;
-
-    exit(1);
-  }
-  const char *filename = argv[optind];
-  if (optind + 1 < argc) {
-    std::cerr << "warning: ignoring everything after " << argv[optind + 1]
-              << std::endl;
-  }
-  simdjson::padded_string p;
+#ifdef __cpp_exceptions
   try {
-    simdjson::get_corpus(filename).swap(p);
-  } catch (const std::exception &) { // caught by reference to base
-    std::cout << "Could not load the file " << filename << std::endl;
+#endif
+  std::string progName = "json2json";
+
+  std::string progUsage = "json2json version ";
+  progUsage += STRINGIFY(SIMDJSON_VERSION);
+  progUsage += " (";
+  progUsage += simdjson::active_implementation->name();
+  progUsage += ")\n";
+  progUsage += "Reads json in, out the result of the parsing.\n";
+  progUsage += argv[0];
+  progUsage += " <jsonfile>\n";
+
+  cxxopts::Options options(progName, progUsage);
+
+  options.add_options()
+  	("d,rawdump", "Dumps the raw content of the tape.", cxxopts::value<bool>()->default_value("false"))
+  	("f,file", "File name.", cxxopts::value<std::string>())
+  	("h,help", "Print usage.")
+  ;
+
+  // the first argument without an option name will be parsed into file
+  options.parse_positional({"file"});
+  auto result = options.parse(argc, argv);
+
+  if(result.count("help")) {
+  	std::cerr << options.help() << std::endl;
+  	return EXIT_SUCCESS;
+  }
+
+  bool rawdump = result["rawdump"].as<bool>();
+
+  if(!result.count("file")) {
+    std::cerr << "No filename specified." << std::endl;
+    std::cerr << options.help() << std::endl;
     return EXIT_FAILURE;
   }
-  simdjson::ParsedJson pj;
-  bool allocok = pj.allocate_capacity(p.size(), 1024);
-  if (!allocok) {
-    std::cerr << "failed to allocate memory" << std::endl;
+
+  const char *filename = result["file"].as<std::string>().c_str();
+
+  simdjson::dom::parser parser;
+  simdjson::dom::element doc;
+  auto error = parser.load(filename).get(doc); // do the parsing, return false on error
+  if (error) {
+    std::cerr << " Parsing failed. Error is '" << error << "'." << std::endl;
     return EXIT_FAILURE;
   }
-  int res =
-      simdjson::json_parse(p, pj); // do the parsing, return false on error
-  if (res != simdjson::SUCCESS) {
-    std::cerr << " Parsing failed. Error is '" << simdjson::error_message(res)
-              << "'." << std::endl;
-    return EXIT_FAILURE;
-  }
-  if (apidump) {
-    simdjson::ParsedJson::Iterator pjh(pj);
-    if (!pjh.is_ok()) {
-      std::cerr << " Could not iterate parsed result. " << std::endl;
-      return EXIT_FAILURE;
-    }
-    compute_dump(pjh);
+  if(rawdump) {
+    doc.dump_raw_tape(std::cout);
   } else {
-    const bool is_ok =
-        rawdump ? pj.dump_raw_tape(std::cout) : pj.print_json(std::cout);
-    if (!is_ok) {
-      std::cerr << " Could not print out parsed result. " << std::endl;
-      return EXIT_FAILURE;
-    }
+    std::cout << doc;
   }
   return EXIT_SUCCESS;
+#ifdef __cpp_exceptions
+  } catch (const cxxopts::OptionException& e) {
+    std::cout << "error parsing options: " << e.what() << std::endl;
+    return EXIT_FAILURE;
+  }
+#endif
 }

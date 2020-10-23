@@ -1,17 +1,13 @@
-set(SIMDJSON_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/include)
-set(SIMDJSON_INCLUDE
-    ${SIMDJSON_INCLUDE_DIR}/simdjson/common_defs.h
-    ${SIMDJSON_INCLUDE_DIR}/simdjson/isadetection.h
-    ${SIMDJSON_INCLUDE_DIR}/simdjson/jsonformatutils.h
-    ${SIMDJSON_INCLUDE_DIR}/simdjson/jsonioutil.h
-    ${SIMDJSON_INCLUDE_DIR}/simdjson/jsonminifier.h
-    ${SIMDJSON_INCLUDE_DIR}/simdjson/jsonparser.h
-    ${SIMDJSON_INCLUDE_DIR}/simdjson/padded_string.h
-    ${SIMDJSON_INCLUDE_DIR}/simdjson/parsedjson.h
-    ${SIMDJSON_INCLUDE_DIR}/simdjson/parsedjsoniterator.h
-    ${SIMDJSON_INCLUDE_DIR}/simdjson/portability.h
-    ${SIMDJSON_INCLUDE_DIR}/simdjson/simdjson.h
-    ${SIMDJSON_INCLUDE_DIR}/simdjson/simdjson_version.h
-    ${SIMDJSON_INCLUDE_DIR}/simdjson/stage1_find_marks.h
-    ${SIMDJSON_INCLUDE_DIR}/simdjson/stage2_build_tape.h
-)
+#
+# Provides the simdjson headers.
+#
+# target_link_libraries(my-project simdjson-headers) grants the headers. It does not provide the
+# source, libraries or any compiler flags.
+#
+add_library(simdjson-headers INTERFACE)
+target_compile_features(simdjson-headers INTERFACE cxx_std_11) # headers require at least C++11
+target_include_directories(simdjson-headers INTERFACE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCDIR}>)
+
+install(TARGETS simdjson-headers EXPORT simdjson-config INCLUDES DESTINATION include)
